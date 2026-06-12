@@ -8,7 +8,7 @@ export function BrandHeader() {
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-white">
             <Image
-              src="/brand/elite-logo.jpeg"
+              src="/brand/elite-logo.png"
               alt="Elite Tour House Makkah"
               width={48}
               height={48}

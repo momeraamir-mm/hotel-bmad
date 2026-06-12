@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Send, Building2, ChevronDown, ChevronRight, Check, Radio, Clock, Pencil } from "lucide-react";
+import { Loader2, Send, Building2, ChevronDown, ChevronRight, Check, Radio, Clock, Pencil, X } from "lucide-react";
 import type { StructuredRequest } from "@/lib/schemas";
 
-type Draft = { supplier: string; hotels: string[]; rateIds: string[]; message: string };
+type DraftRate = { rateId: string; hotel: string };
+type Draft = { supplier: string; rates: DraftRate[]; message: string };
 type Change = {
   hotel: string;
   oldCost: number;
@@ -21,12 +22,34 @@ function replyDelay(supplier: string, index: number): number {
   return 900 + index * 1300 + (hash % 1000);
 }
 
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+const STOP = new Set(["makkah", "mecca", "hotel", "hotels", "tower", "towers", "the", "and", "suites", "royal", "clock", "house", "jabal", "omar", "kaaba", "by", "al"]);
+const hotelTokens = (hotel: string) =>
+  norm(hotel).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !STOP.has(w));
+
+const shortHotel = (h: string) => h.split(/[(]/)[0].split(" ").slice(0, 3).join(" ").trim();
+
+/** Best-effort: drop the lines of a draft that name a removed hotel. */
+function stripHotelFromMessage(message: string, hotel: string): string {
+  const toks = hotelTokens(hotel);
+  if (toks.length === 0) return message;
+  const kept = message.split("\n").filter((ln) => {
+    const n = norm(ln);
+    return !toks.some((t) => n.includes(t));
+  });
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+const distinctHotels = (rates: DraftRate[]) => [...new Set(rates.map((r) => r.hotel))];
+
 export function SupplierAutoRequests({
   request,
   onRefreshed,
+  onReplyReceived,
 }: {
   request: StructuredRequest | null;
   onRefreshed: () => void;
+  onReplyReceived: (rateIds: string[]) => void;
 }) {
   const complete = !!(request?.roomType && request?.checkIn && request?.checkOut);
   const key = complete
@@ -76,20 +99,33 @@ export function SupplierAutoRequests({
   useEffect(() => clearTimers, []);
 
   async function fetchReply(draft: Draft) {
+    const rateIds = draft.rates.map((r) => r.rateId);
     try {
       const res = await fetch("/api/supplier-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ supplier: draft.supplier, rateIds: draft.rateIds }),
+        body: JSON.stringify({ supplier: draft.supplier, rateIds, message: draft.message }),
       });
       const json = await res.json();
       if (json.ok) {
         setReplies((r) => [...r, json.data]);
         onRefreshed();
+        onReplyReceived(json.data.rateIds ?? rateIds); // populate Compare with only what replied
       }
     } finally {
       setPending((p) => p.filter((s) => s !== draft.supplier));
     }
+  }
+
+  /** Remove a hotel from a draft (and from its outreach text) before sending. */
+  function removeHotel(supplier: string, hotel: string) {
+    setDrafts((ds) =>
+      ds.map((d) =>
+        d.supplier === supplier
+          ? { ...d, rates: d.rates.filter((r) => r.hotel !== hotel), message: stripHotelFromMessage(d.message, hotel) }
+          : d,
+      ),
+    );
   }
 
   /** A supplier is "sent" once it's awaiting a reply or has already replied. */
@@ -102,7 +138,7 @@ export function SupplierAutoRequests({
   }
 
   function sendOne(draft: Draft) {
-    if (isSent(draft.supplier)) return;
+    if (isSent(draft.supplier) || draft.rates.length === 0) return;
     setOpen(true);
     setPending((p) => [...p, draft.supplier]);
     const t = setTimeout(() => fetchReply(draft), replyDelay(draft.supplier, 0));
@@ -110,7 +146,7 @@ export function SupplierAutoRequests({
   }
 
   function sendAll() {
-    const remaining = drafts.filter((d) => !isSent(d.supplier));
+    const remaining = drafts.filter((d) => d.rates.length > 0 && !isSent(d.supplier));
     if (remaining.length === 0) return;
     setOpen(true);
     setPending((p) => [...p, ...remaining.map((d) => d.supplier)]);
@@ -121,13 +157,13 @@ export function SupplierAutoRequests({
   }
 
   const supplierCount = drafts.length;
-  const hotelCount = new Set(drafts.flatMap((d) => d.hotels)).size;
+  const hotelCount = new Set(drafts.flatMap((d) => d.rates.map((r) => r.hotel))).size;
   const replyFor = (supplier: string) => replies.find((r) => r.supplier === supplier);
   const isPending = (supplier: string) => pending.includes(supplier);
   const totalUpdated = replies.reduce((n, r) => n + r.changes.length, 0);
-  const unsentCount = drafts.filter((d) => !isSent(d.supplier)).length;
-  const sentCount = supplierCount - unsentCount;
-  const allDone = supplierCount > 0 && unsentCount === 0 && pending.length === 0;
+  const sentCount = drafts.filter((d) => isSent(d.supplier)).length;
+  const unsentCount = drafts.filter((d) => d.rates.length > 0 && !isSent(d.supplier)).length;
+  const allDone = sentCount > 0 && unsentCount === 0 && pending.length === 0;
 
   if (!complete) {
     return (
@@ -194,6 +230,31 @@ export function SupplierAutoRequests({
                       {waiting && <span className="font-normal text-amber-700">· awaiting reply…</span>}
                       {r && <span className="font-normal text-green-700">· sent</span>}
                     </p>
+
+                    {editable && (
+                      <div className="mb-2 flex flex-wrap items-center gap-1">
+                        <span className="text-[10px] text-ink/40">Hotels asked:</span>
+                        {distinctHotels(d.rates).map((h) => (
+                          <span
+                            key={h}
+                            className="flex items-center gap-1 rounded-full border border-sand bg-white px-2 py-0.5 text-[10px] text-ink/70"
+                          >
+                            {shortHotel(h)}
+                            <button
+                              onClick={() => removeHotel(d.supplier, h)}
+                              title="Remove this hotel from the request"
+                              className="text-ink/40 transition hover:text-red-600"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                        {d.rates.length === 0 && (
+                          <span className="text-[10px] font-medium text-red-600">No hotels — won&apos;t be sent</span>
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex justify-end">
                       <div className="w-[85%] rounded-2xl rounded-br-sm bg-ink px-3 py-2 text-[11px] text-white">
                         <span className="mb-0.5 flex items-center justify-between text-[9px] uppercase tracking-wide text-white/50">
@@ -219,7 +280,8 @@ export function SupplierAutoRequests({
                           <div className="mt-1.5 flex justify-end">
                             <button
                               onClick={() => sendOne(d)}
-                              className="flex items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-white/25"
+                              disabled={d.rates.length === 0}
+                              className="flex items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-white/25 disabled:opacity-40"
                             >
                               <Send className="h-3 w-3" /> Send to {d.supplier.split(" ")[0]}
                             </button>

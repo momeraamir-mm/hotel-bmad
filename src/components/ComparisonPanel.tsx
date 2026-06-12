@@ -18,6 +18,8 @@ type Props = {
   rates: Rate[];
   history: Record<string, HistoryPoint[]>;
   request: StructuredRequest | null;
+  sourcedHotels: string[] | null;
+  receivedRateIds: string[];
   marginPct: number;
   setMarginPct: (n: number) => void;
   onGenerateQuote: (rateId: string) => void;
@@ -31,6 +33,8 @@ export function ComparisonPanel({
   rates,
   history,
   request,
+  sourcedHotels,
+  receivedRateIds,
   marginPct,
   setMarginPct,
   onGenerateQuote,
@@ -83,12 +87,19 @@ export function ComparisonPanel({
         checkOut: request!.checkOut!,
         city: request!.city,
         hotelPreference: request!.hotelPreference,
+        hotels: sourcedHotels,
       }
     : null;
 
+  // Compare only the rates that have actually come back from suppliers for this request.
+  const visibleRates = useMemo(
+    () => rates.filter((r) => receivedRateIds.includes(r.id)),
+    [rates, receivedRateIds],
+  );
+
   const result = useMemo(
-    () => (criteria ? compareRates(rates, criteria, marginPct) : null),
-    [rates, criteria, marginPct],
+    () => (criteria ? compareRates(visibleRates, criteria, marginPct) : null),
+    [visibleRates, criteria, marginPct],
   );
 
   const stayNights = useMemo(
@@ -139,7 +150,7 @@ export function ComparisonPanel({
           </label>
           <button
             onClick={run}
-            disabled={!canRun}
+            disabled={!canRun || !result || result.rows.length === 0}
             className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
           >
             <Sparkles className="h-4 w-4" /> Run comparison
@@ -205,6 +216,7 @@ export function ComparisonPanel({
             </div>
           )}
 
+          {result.rows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -316,9 +328,19 @@ export function ComparisonPanel({
               </tbody>
             </table>
           </div>
-          {!ran && (
+          )}
+          {result.rows.length === 0 && (
+            <p className="px-2 py-8 text-center text-sm text-ink/50">
+              Waiting for supplier replies — rates appear here as suppliers respond. Send the rate-requests in{" "}
+              <strong>2 · Suppliers</strong> to populate this comparison.
+            </p>
+          )}
+          {!ran && result.rows.length > 0 && (
             <p className="mt-2 px-2 text-xs text-ink/45">
-              Showing {result.rows.length} matching rates. Click <strong>Run comparison</strong> for the AI Best-Pick rationale.
+              Showing {result.rows.length} rates from {new Set(result.rows.map((r) => r.rate.hotel)).size} hotel
+              {new Set(result.rows.map((r) => r.rate.hotel)).size > 1 ? "s" : ""} that replied
+              {sourcedHotels && sourcedHotels.length > 0 ? ` (of ${sourcedHotels.length} sourced)` : ""}. Click{" "}
+              <strong>Run comparison</strong> for the AI Best-Pick rationale.
             </p>
           )}
         </div>

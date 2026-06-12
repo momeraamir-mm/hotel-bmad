@@ -7,6 +7,7 @@ export type CompareCriteria = {
   checkOut: string;
   city?: City | null;
   hotelPreference?: string | null;
+  hotels?: string[] | null; // the hotels actually sourced from suppliers for THIS request
 };
 
 export type ComparedRow = {
@@ -36,7 +37,13 @@ export function compareRates(
   // requested room type so the seeded scenario always has something to compare.)
   const matched = rates.filter((r) => r.roomType === criteria.roomType);
 
-  const pool = matched.length > 0 ? matched : rates;
+  let pool = matched.length > 0 ? matched : rates;
+
+  // Scope to the hotels we actually sourced for this request — you only compare what
+  // suppliers quoted for this requirement, not the whole inventory.
+  if (criteria.hotels && criteria.hotels.length > 0) {
+    pool = pool.filter((r) => criteria.hotels!.includes(r.hotel));
+  }
 
   const rows: ComparedRow[] = pool.map((rate) => {
     const complete = isRateComplete(rate);

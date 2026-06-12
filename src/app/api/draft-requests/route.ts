@@ -24,18 +24,17 @@ export async function POST(req: Request) {
         r.costPrice != null,
     );
 
-    // Group matching rates by supplier.
-    const bySupplier = new Map<string, { hotels: Set<string>; rateIds: string[] }>();
+    // Group matching rates by supplier, keeping the hotel ↔ rate mapping so the UI
+    // can show removable hotel chips that reliably drive what's actually requested.
+    const bySupplier = new Map<string, { rateId: string; hotel: string }[]>();
     for (const r of matching) {
-      if (!bySupplier.has(r.supplier)) bySupplier.set(r.supplier, { hotels: new Set(), rateIds: [] });
-      const g = bySupplier.get(r.supplier)!;
-      g.hotels.add(r.hotel);
-      g.rateIds.push(r.id);
+      if (!bySupplier.has(r.supplier)) bySupplier.set(r.supplier, []);
+      bySupplier.get(r.supplier)!.push({ rateId: r.id, hotel: r.hotel });
     }
 
     const drafts = await Promise.all(
-      [...bySupplier.entries()].map(async ([supplier, g]) => {
-        const hotels = [...g.hotels];
+      [...bySupplier.entries()].map(async ([supplier, rateRows]) => {
+        const hotels = [...new Set(rateRows.map((x) => x.hotel))];
         const message = await chatText({
           system: SUPPLIER_BATCH_SYSTEM,
           user: supplierBatchUser({
@@ -48,7 +47,7 @@ export async function POST(req: Request) {
           label: "draft-requests",
           temperature: 0.4,
         });
-        return { supplier, hotels, rateIds: g.rateIds, message };
+        return { supplier, rates: rateRows, message };
       }),
     );
 

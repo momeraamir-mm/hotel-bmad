@@ -154,7 +154,7 @@ export function QuotationView({
           <div className="mb-4 flex items-center justify-between border-b border-sand pb-3">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-white ring-1 ring-sand">
-                <Image src="/brand/elite-logo.jpeg" alt="Elite Tour House" width={44} height={44} className="object-cover" />
+                <Image src="/brand/elite-logo.png" alt="Elite Tour House" width={44} height={44} className="object-cover" />
               </div>
               <div>
                 <p className="font-semibold text-ink">Elite Tour House Makkah</p>
