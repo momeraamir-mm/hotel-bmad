@@ -29,14 +29,45 @@ const hotelTokens = (hotel: string) =>
 
 const shortHotel = (h: string) => h.split(/[(]/)[0].split(" ").slice(0, 3).join(" ").trim();
 
-/** Best-effort: drop the lines of a draft that name a removed hotel. */
-function stripHotelFromMessage(message: string, hotel: string): string {
+/**
+ * Remove only the named hotel from the draft text — surgically, so the other hotels
+ * survive. On a comma list ("Hotel(s): A, B") it drops just that item; a line that names
+ * only the removed hotel is dropped; a line that still names a surviving hotel is kept.
+ */
+function stripHotelFromMessage(message: string, hotel: string, survivors: string[]): string {
   const toks = hotelTokens(hotel);
   if (toks.length === 0) return message;
-  const kept = message.split("\n").filter((ln) => {
-    const n = norm(ln);
-    return !toks.some((t) => n.includes(t));
-  });
+  const matchesRemoved = (s: string) => {
+    const n = norm(s);
+    return toks.some((t) => n.includes(t));
+  };
+  const survivorToks = survivors.map((h) => hotelTokens(h));
+  const mentionsSurvivor = (s: string) => {
+    const n = norm(s);
+    return survivorToks.some((ts) => ts.length > 0 && ts.some((t) => n.includes(t)));
+  };
+
+  const kept = message
+    .split("\n")
+    .map((ln): string | null => {
+      if (!matchesRemoved(ln)) return ln;
+      // The line references the removed hotel. If it's a comma list, drop just that item.
+      const colon = ln.indexOf(":");
+      const prefix = colon >= 0 ? ln.slice(0, colon + 1) : "";
+      const rest = colon >= 0 ? ln.slice(colon + 1) : ln;
+      if (rest.includes(",")) {
+        const remaining = rest
+          .split(",")
+          .map((s) => s.trim())
+          .filter((it) => it && !matchesRemoved(it));
+        if (remaining.length > 0) return `${prefix} ${remaining.join(", ")}`.trim();
+        return null; // no hotels left on this line
+      }
+      // Single reference: keep it only if a surviving hotel is also named on the line.
+      return mentionsSurvivor(ln) ? ln : null;
+    })
+    .filter((ln): ln is string => ln !== null);
+
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -46,10 +77,12 @@ export function SupplierAutoRequests({
   request,
   onRefreshed,
   onReplyReceived,
+  onSourced,
 }: {
   request: StructuredRequest | null;
   onRefreshed: () => void;
   onReplyReceived: (rateIds: string[]) => void;
+  onSourced: (rateIds: string[]) => void;
 }) {
   const complete = !!(request?.roomType && request?.checkIn && request?.checkOut);
   const key = complete
@@ -63,6 +96,11 @@ export function SupplierAutoRequests({
   const [open, setOpen] = useState(false);
   const lastKey = useRef<string>("");
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Keep a live ref so we can report the sourced set without re-running effects.
+  const onSourcedRef = useRef(onSourced);
+  onSourcedRef.current = onSourced;
+
+  const askedIds = (ds: Draft[]) => ds.flatMap((d) => d.rates.map((rr) => rr.rateId));
 
   function clearTimers() {
     timers.current.forEach((t) => clearTimeout(t));
@@ -88,6 +126,9 @@ export function SupplierAutoRequests({
         const json = await res.json();
         if (json.ok) {
           setDrafts(json.data.drafts);
+          // Report the sourced universe so Compare can show every asked supplier rate,
+          // marking the not-yet-replied ones as pending.
+          onSourcedRef.current(askedIds(json.data.drafts));
           setOpen(true); // surface the drafts so they can be reviewed/edited before sending
         }
       } finally {
@@ -119,13 +160,14 @@ export function SupplierAutoRequests({
 
   /** Remove a hotel from a draft (and from its outreach text) before sending. */
   function removeHotel(supplier: string, hotel: string) {
-    setDrafts((ds) =>
-      ds.map((d) =>
-        d.supplier === supplier
-          ? { ...d, rates: d.rates.filter((r) => r.hotel !== hotel), message: stripHotelFromMessage(d.message, hotel) }
-          : d,
-      ),
-    );
+    const next = drafts.map((d) => {
+      if (d.supplier !== supplier) return d;
+      const rates = d.rates.filter((r) => r.hotel !== hotel);
+      const survivors = [...new Set(rates.map((r) => r.hotel))];
+      return { ...d, rates, message: stripHotelFromMessage(d.message, hotel, survivors) };
+    });
+    setDrafts(next);
+    onSourcedRef.current(askedIds(next)); // shrink the sourced universe to match
   }
 
   /** A supplier is "sent" once it's awaiting a reply or has already replied. */

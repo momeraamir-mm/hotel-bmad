@@ -37,6 +37,17 @@ const ROOM_MULT: Record<RoomType, number> = {
   Suite: 2.1,
 };
 
+// Every room type is quotable — for any requested room, each supplier returns a rate
+// specific to that room (no standing price list, no "default to Double").
+const ALL_ROOM_TYPES: RoomType[] = ["Single", "Double", "Triple", "Quad", "Suite"];
+const ROOM_CODE: Record<RoomType, string> = {
+  Single: "sgl",
+  Double: "dbl",
+  Triple: "trp",
+  Quad: "quad",
+  Suite: "ste",
+};
+
 // Each hotel is offered by 3 suppliers; supplier index → cost multiplier (rate spread).
 const HOTEL_SUPPLIERS: Record<string, string[]> = {
   "h-fairmont": ["s-haramain", "s-barakah", "s-safa"],
@@ -58,10 +69,6 @@ const HOTEL_SUPPLIERS: Record<string, string[]> = {
 const SUPPLIER_SPREAD = [0.97, 1.0, 1.05]; // 1st supplier cheapest, etc.
 const INCLUSION_SETS = [["Breakfast"], ["Breakfast", "Dinner"], []];
 const AVAILABILITY = [6, 12, 3];
-const CAPTURED_DAYS_AGO = [0.2, 2.1, 5.0]; // fresh / aging / stale — rates must be re-confirmed
-
-const NOW_MS = Date.now();
-const iso = (daysAgo: number) => new Date(NOW_MS - daysAgo * 86_400_000).toISOString();
 
 function supplierName(id: string): string {
   return SEED_SUPPLIERS.find((s) => s.id === id)?.name ?? id;
@@ -83,42 +90,29 @@ function buildRates(): SeededRate[] {
   for (const hotel of SEED_HOTELS) {
     const base = BASE_COST[hotel.id];
     const suppliers = HOTEL_SUPPLIERS[hotel.id];
-    // Headline Double rate from each of the 3 suppliers.
-    suppliers.forEach((supId, i) => {
-      const cost = Math.round(base * SUPPLIER_SPREAD[i]);
-      out.push({
-        id: `${hotel.id}-${supId}-dbl`,
-        hotel: hotel.name,
-        city: hotel.city,
-        supplier: supplierName(supId),
-        roomType: "Double",
-        checkIn: HEADLINE_CHECKIN,
-        checkOut: HEADLINE_CHECKOUT,
-        costPrice: cost,
-        inclusions: INCLUSION_SETS[i],
-        availability: AVAILABILITY[i],
-        source: "seed",
-        capturedAt: iso(CAPTURED_DAYS_AGO[i]),
-        history: makeHistory(cost),
+    // Each of the 3 suppliers quotes every room type — so whatever room the client
+    // needs, the comparison shows that exact room priced by all suppliers.
+    for (const roomType of ALL_ROOM_TYPES) {
+      const roomBase = base * ROOM_MULT[roomType];
+      suppliers.forEach((supId, i) => {
+        const cost = Math.round(roomBase * SUPPLIER_SPREAD[i]);
+        out.push({
+          id: `${hotel.id}-${supId}-${ROOM_CODE[roomType]}`,
+          hotel: hotel.name,
+          city: hotel.city,
+          supplier: supplierName(supId),
+          roomType,
+          checkIn: HEADLINE_CHECKIN,
+          checkOut: HEADLINE_CHECKOUT,
+          costPrice: cost,
+          inclusions: INCLUSION_SETS[i],
+          availability: AVAILABILITY[i],
+          source: "seed",
+          capturedAt: null,
+          history: makeHistory(cost),
+        });
       });
-    });
-    // A Triple rate from the first supplier for room-type variety.
-    const tripleCost = Math.round(base * ROOM_MULT.Triple * SUPPLIER_SPREAD[0]);
-    out.push({
-      id: `${hotel.id}-${suppliers[0]}-trp`,
-      hotel: hotel.name,
-      city: hotel.city,
-      supplier: supplierName(suppliers[0]),
-      roomType: "Triple",
-      checkIn: HEADLINE_CHECKIN,
-      checkOut: HEADLINE_CHECKOUT,
-      costPrice: tripleCost,
-      inclusions: INCLUSION_SETS[0],
-      availability: 4,
-      source: "seed",
-      capturedAt: iso(3.5),
-      history: makeHistory(tripleCost),
-    });
+    }
   }
   return out;
 }

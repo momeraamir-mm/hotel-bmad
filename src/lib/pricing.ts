@@ -35,24 +35,6 @@ export type TrendInfo = {
   series: number[]; // oldest → newest, for sparkline
 };
 
-export type Freshness = {
-  label: "fresh" | "aging" | "stale" | "unknown";
-  ageHours: number | null;
-  ageText: string;
-};
-
-/** How recently a rate was confirmed with the supplier. nowMs lets the caller pass a stable clock. */
-export function freshness(capturedAt: string | null | undefined, nowMs: number): Freshness {
-  if (!capturedAt) return { label: "unknown", ageHours: null, ageText: "not confirmed" };
-  const ageMs = nowMs - new Date(capturedAt).getTime();
-  const ageHours = Math.max(0, Math.round(ageMs / 3_600_000));
-  const ageDays = ageHours / 24;
-  const ageText =
-    ageHours < 1 ? "just now" : ageHours < 24 ? `${ageHours}h ago` : `${Math.round(ageDays)}d ago`;
-  const label = ageDays > 3 ? "stale" : ageDays >= 1 ? "aging" : "fresh";
-  return { label, ageHours, ageText };
-}
-
 export function trend(history: HistoryPoint[] | undefined, current: number | null): TrendInfo {
   if (!history || history.length === 0 || current == null) {
     return { hasHistory: false, deltaPct: null, direction: null, series: [] };

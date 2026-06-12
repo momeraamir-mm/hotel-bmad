@@ -1,30 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, Trophy, TrendingUp, TrendingDown, Minus, Sparkles, FileText, Lock, RefreshCw, MessageSquare, X } from "lucide-react";
+import { Loader2, Trophy, TrendingUp, TrendingDown, Minus, Sparkles, FileText, Lock, Clock } from "lucide-react";
 import type { HistoryPoint, Rate, StructuredRequest } from "@/lib/schemas";
 import { compareRates, type CompareCriteria } from "@/lib/compare";
-import { profit, trend, nights, freshness, type Freshness } from "@/lib/pricing";
+import { profit, trend, nights } from "@/lib/pricing";
 import { Sparkline } from "./Sparkline";
-
-const FRESH_STYLE: Record<Freshness["label"], string> = {
-  fresh: "bg-green-100 text-green-700",
-  aging: "bg-amber-100 text-amber-700",
-  stale: "bg-red-100 text-red-700",
-  unknown: "bg-sand text-ink/50",
-};
 
 type Props = {
   rates: Rate[];
   history: Record<string, HistoryPoint[]>;
   request: StructuredRequest | null;
-  sourcedHotels: string[] | null;
-  receivedRateIds: string[];
+  sourcedRateIds: string[]; // every supplier rate we asked for (the comparison universe)
+  receivedRateIds: string[]; // the subset that has actually replied so far
   marginPct: number;
   setMarginPct: (n: number) => void;
   onGenerateQuote: (rateId: string) => void;
   generatingRateId: string | null;
-  onRechecked: () => void;
 };
 
 const sar = (n: number | null) => (n == null ? "—" : `SAR ${n.toLocaleString()}`);
@@ -33,50 +25,17 @@ export function ComparisonPanel({
   rates,
   history,
   request,
-  sourcedHotels,
+  sourcedRateIds,
   receivedRateIds,
   marginPct,
   setMarginPct,
   onGenerateQuote,
   generatingRateId,
-  onRechecked,
 }: Props) {
   const [ran, setRan] = useState(false);
   const [rationale, setRationale] = useState<string | null>(null);
   const [tradeoff, setTradeoff] = useState<string | null>(null);
   const [loadingRationale, setLoadingRationale] = useState(false);
-  const [recheckingId, setRecheckingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<
-    | { message: string; hotel: string; supplier: string; costDelta: number; oldAvail: number; newAvail: number }
-    | null
-  >(null);
-
-  const nowMs = Date.now();
-
-  async function recheck(rate: Rate) {
-    setRecheckingId(rate.id);
-    try {
-      const res = await fetch("/api/recheck", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rateId: rate.id }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        setDraft({
-          message: json.data.draftMessage,
-          hotel: rate.hotel,
-          supplier: rate.supplier,
-          costDelta: json.data.change.costDelta,
-          oldAvail: json.data.change.oldAvail,
-          newAvail: json.data.change.newAvail,
-        });
-        onRechecked();
-      }
-    } finally {
-      setRecheckingId(null);
-    }
-  }
 
   const canRun = !!(request?.roomType && request?.checkIn && request?.checkOut);
 
@@ -87,20 +46,25 @@ export function ComparisonPanel({
         checkOut: request!.checkOut!,
         city: request!.city,
         hotelPreference: request!.hotelPreference,
-        hotels: sourcedHotels,
+        // No hotel filter here — `sourcedRateIds` already scopes the universe to exactly
+        // what we asked for (incl. manually-accepted supplier rates).
       }
     : null;
 
-  // Compare only the rates that have actually come back from suppliers for this request.
-  const visibleRates = useMemo(
-    () => rates.filter((r) => receivedRateIds.includes(r.id)),
-    [rates, receivedRateIds],
+  // The universe = every supplier rate we sourced for this request. Replied ones get
+  // priced; the rest show as "awaiting reply" — so Compare never waits for all of them.
+  const universeRates = useMemo(
+    () => rates.filter((r) => sourcedRateIds.includes(r.id)),
+    [rates, sourcedRateIds],
   );
 
   const result = useMemo(
-    () => (criteria ? compareRates(visibleRates, criteria, marginPct) : null),
-    [visibleRates, criteria, marginPct],
+    () => (criteria ? compareRates(universeRates, criteria, marginPct, receivedRateIds) : null),
+    [universeRates, criteria, marginPct, receivedRateIds],
   );
+
+  const receivedCount = result ? result.rows.filter((r) => r.received).length : 0;
+  const hasReceived = result ? result.rows.some((r) => r.received && r.complete) : false;
 
   const stayNights = useMemo(
     () => nights(request?.checkIn ?? null, request?.checkOut ?? null),
@@ -117,7 +81,8 @@ export function ComparisonPanel({
       const res = await fetch("/api/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: result.rows, bestPickId: result.bestPickId }),
+        // Only reason over rates that actually replied — pending rows have no figures.
+        body: JSON.stringify({ rows: result.rows.filter((r) => r.received), bestPickId: result.bestPickId }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -150,7 +115,8 @@ export function ComparisonPanel({
           </label>
           <button
             onClick={run}
-            disabled={!canRun || !result || result.rows.length === 0}
+            disabled={!canRun || !hasReceived}
+            title={!hasReceived ? "Waiting for at least one supplier reply" : undefined}
             className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
           >
             <Sparkles className="h-4 w-4" /> Run comparison
@@ -194,28 +160,6 @@ export function ComparisonPanel({
             </div>
           )}
 
-          {draft && (
-            <div className="mb-3 rounded-xl border border-ink/15 bg-white p-3">
-              <div className="mb-1 flex items-center gap-1.5 text-sm font-medium text-ink">
-                <MessageSquare className="h-4 w-4 text-brand" /> Rate-request drafted for {draft.supplier} — {draft.hotel}
-                <button onClick={() => setDraft(null)} className="ml-auto text-ink/40 hover:text-ink">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <pre className="whitespace-pre-wrap rounded-lg bg-cream/60 p-2.5 text-xs text-ink/80">{draft.message}</pre>
-              <p className="mt-2 text-xs text-ink/70">
-                <span className="font-medium">Supplier confirmed (simulated):</span> rate{" "}
-                <span className={draft.costDelta > 0 ? "text-red-600" : draft.costDelta < 0 ? "text-green-700" : ""}>
-                  {draft.costDelta > 0 ? "+" : ""}{draft.costDelta === 0 ? "unchanged" : `SAR ${draft.costDelta}/night`}
-                </span>
-                , availability {draft.oldAvail} → {draft.newAvail} rooms. Rate refreshed just now.
-              </p>
-              <p className="mt-1 text-[11px] italic text-ink/45">
-                In production this message is sent to the supplier on WhatsApp after human approval; here the reply is simulated.
-              </p>
-            </div>
-          )}
-
           {result.rows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
@@ -234,8 +178,24 @@ export function ComparisonPanel({
               </thead>
               <tbody>
                 {result.rows.map((row) => {
-                  const t = trend(history[row.rate.id], row.rate.costPrice);
                   const best = row.isBestPick;
+                  // Pending row — sourced but the supplier hasn't replied yet.
+                  if (!row.received) {
+                    return (
+                      <tr key={row.rate.id} className="border-t border-sand opacity-80">
+                        <td className="px-2 py-2">
+                          <div className="font-medium text-ink/70">{row.rate.hotel}</div>
+                          <div className="text-[11px] text-ink/50">{row.rate.supplier}</div>
+                        </td>
+                        <td className="px-2 py-2" colSpan={8}>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                            <Clock className="h-3 w-3 animate-pulse" /> awaiting supplier reply
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const t = trend(history[row.rate.id], row.rate.costPrice);
                   return (
                     <tr
                       key={row.rate.id}
@@ -251,14 +211,6 @@ export function ComparisonPanel({
                           {row.rate.city ? ` · ${row.rate.city}` : ""}
                           {row.rate.source === "extracted" ? " · new" : ""}
                         </div>
-                        {(() => {
-                          const f = freshness(row.rate.capturedAt, nowMs);
-                          return (
-                            <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${FRESH_STYLE[f.label]}`}>
-                              {f.label === "stale" ? "stale" : f.label} · {f.ageText}
-                            </span>
-                          );
-                        })()}
                       </td>
                       <td className="px-2 py-2 text-ink/70">{sar(row.rate.costPrice)}</td>
                       <td className="px-2 py-2 font-semibold text-ink">{sar(row.clientPrice)}</td>
@@ -291,19 +243,6 @@ export function ComparisonPanel({
                       </td>
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => recheck(row.rate)}
-                            disabled={recheckingId === row.rate.id}
-                            title="Re-check rate & availability with supplier"
-                            className="flex items-center gap-1 rounded-md border border-sand px-2 py-1 text-xs text-ink/60 hover:bg-sand"
-                          >
-                            {recheckingId === row.rate.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-3.5 w-3.5" />
-                            )}
-                            Re-check
-                          </button>
                           {row.complete && (
                             <button
                               onClick={() => onGenerateQuote(row.rate.id)}
@@ -331,16 +270,23 @@ export function ComparisonPanel({
           )}
           {result.rows.length === 0 && (
             <p className="px-2 py-8 text-center text-sm text-ink/50">
-              Waiting for supplier replies — rates appear here as suppliers respond. Send the rate-requests in{" "}
-              <strong>2 · Suppliers</strong> to populate this comparison.
+              No rates sourced yet — send the rate-requests in <strong>2 · Suppliers</strong> and replies will appear here
+              as suppliers respond.
             </p>
           )}
           {!ran && result.rows.length > 0 && (
             <p className="mt-2 px-2 text-xs text-ink/45">
-              Showing {result.rows.length} rates from {new Set(result.rows.map((r) => r.rate.hotel)).size} hotel
-              {new Set(result.rows.map((r) => r.rate.hotel)).size > 1 ? "s" : ""} that replied
-              {sourcedHotels && sourcedHotels.length > 0 ? ` (of ${sourcedHotels.length} sourced)` : ""}. Click{" "}
-              <strong>Run comparison</strong> for the AI Best-Pick rationale.
+              <strong>{receivedCount}</strong> of <strong>{result.rows.length}</strong> sourced supplier rate
+              {result.rows.length > 1 ? "s" : ""} in
+              {receivedCount < result.rows.length ? " — the rest are still awaiting reply" : ""}.{" "}
+              {hasReceived ? (
+                <>
+                  Click <strong>Run comparison</strong> for the AI Best-Pick rationale — you don&apos;t have to wait for
+                  every supplier.
+                </>
+              ) : (
+                <>Rates fill in as suppliers reply.</>
+              )}
             </p>
           )}
         </div>

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { chatText } from "@/lib/groq/chat";
 import { getWorkingRates } from "@/lib/store";
 import { structuredRequestSchema } from "@/lib/schemas";
+import { nights } from "@/lib/pricing";
 import { SUPPLIER_BATCH_SYSTEM, supplierBatchUser } from "@/lib/prompts/supplierBatchRequest";
 
 export const runtime = "nodejs";
@@ -43,6 +44,8 @@ export async function POST(req: Request) {
             roomType: request.roomType!,
             checkIn: request.checkIn!,
             checkOut: request.checkOut!,
+            nights: nights(request.checkIn, request.checkOut),
+            pax: request.pax,
           }),
           label: "draft-requests",
           temperature: 0.4,

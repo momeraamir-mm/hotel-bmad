@@ -16,7 +16,6 @@ import type { HistoryPoint, Quotation, Rate, StructuredRequest } from "@/lib/sch
 export default function Home() {
   const [view, setView] = useState<"board" | "detail">("board");
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
-  const [sourcedHotels, setSourcedHotels] = useState<string[] | null>(null);
   const [request, setRequest] = useState<StructuredRequest | null>(null);
   const [rates, setRates] = useState<Rate[]>([]);
   const [history, setHistory] = useState<Record<string, HistoryPoint[]>>({});
@@ -25,8 +24,10 @@ export default function Home() {
   const [quotation, setQuotation] = useState<Quotation | null>(null);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [activeStep, setActiveStep] = useState<"intake" | "compare" | "quote">("intake");
-  // Rate ids that have actually come back from suppliers for the open request — Compare
-  // only shows these (it fills up as replies arrive), not the whole inventory.
+  // Every supplier rate we sourced (asked for) on the open request — the Compare universe.
+  const [sourcedRateIds, setSourcedRateIds] = useState<string[]>([]);
+  // The subset that has actually replied so far. Compare shows the full sourced set, with
+  // the not-yet-replied ones marked "awaiting reply" — it never waits for all of them.
   const [receivedRateIds, setReceivedRateIds] = useState<string[]>([]);
 
   const loadRates = useCallback(async () => {
@@ -86,32 +87,58 @@ export default function Home() {
     setReceivedRateIds((prev) => [...new Set([...prev, ...ids])]);
   }
 
-  /** Leads already past sourcing have their replies "in"; earlier ones start empty. */
-  function receivedForLead(lead: Lead): string[] {
-    const repliedStages = ["Ready to quote", "Awaiting approval", "Sent"];
-    if (!repliedStages.includes(lead.status) || !lead.sourcedHotels) return [];
-    return rates
-      .filter((r) => lead.sourcedHotels!.includes(r.hotel) && r.roomType === lead.request.roomType)
-      .map((r) => r.id);
+  /** Manually pasted + accepted supplier rates: reload the inventory, then add them to
+   *  both the sourced universe and the replied set so they show, priced, in Compare. */
+  async function onRatesAccepted(ids: string[]) {
+    await loadRates();
+    setSourcedRateIds((prev) => [...new Set([...prev, ...ids])]);
+    setReceivedRateIds((prev) => [...new Set([...prev, ...ids])]);
+  }
+
+  /** New-request flow only: the live drafts define the sourced universe. For an opened
+   *  lead the universe is fixed at open time, so we ignore this to avoid clobbering it. */
+  function onLiveSourced(ids: string[]) {
+    if (activeLead === null) setSourcedRateIds(ids);
+  }
+
+  /** Every supplier rate we asked for on this lead = its sourced hotels × requested room. */
+  function universeForLead(lead: Lead): Rate[] {
+    if (!lead.sourcedHotels) return [];
+    return rates.filter(
+      (r) => lead.sourcedHotels!.includes(r.hotel) && r.roomType === lead.request.roomType,
+    );
+  }
+
+  /** Which of the sourced rates have replied: all once past sourcing; partway through
+   *  sourcing, the earlier hotels are in and the last is still awaiting. */
+  function receivedForLead(lead: Lead, universe: Rate[]): string[] {
+    const allIn = ["Ready to quote", "Awaiting approval", "Sent"];
+    if (allIn.includes(lead.status)) return universe.map((r) => r.id);
+    if (lead.status === "Sourcing rates" && lead.sourcedHotels && lead.sourcedHotels.length > 0) {
+      const pendingHotel = lead.sourcedHotels[lead.sourcedHotels.length - 1];
+      return universe.filter((r) => r.hotel !== pendingHotel).map((r) => r.id);
+    }
+    return [];
   }
 
   function openLead(lead: Lead) {
-    const received = receivedForLead(lead);
+    const universe = universeForLead(lead);
+    const received = receivedForLead(lead, universe);
     setActiveLead(lead);
     setRequest(lead.request);
-    setSourcedHotels(lead.sourcedHotels ?? null);
+    setSourcedRateIds(universe.map((r) => r.id));
     setReceivedRateIds(received);
     setQuotation(null);
-    // Land where the work is: if rates are already in, open Compare; otherwise Intake
-    // (where you source supplier rates) so Compare isn't an empty screen.
-    setActiveStep(received.length > 0 ? "compare" : "intake");
+    // Land where the work is: once rates are sourced, open Compare even if some suppliers
+    // are still pending; only fall back to Intake when nothing has been sourced yet.
+    setActiveStep(universe.length > 0 ? "compare" : "intake");
     setView("detail");
   }
 
   function newRequest() {
     setActiveLead(null);
     setRequest(null);
-    setSourcedHotels(null);
+    setSourcedRateIds([]);
     setReceivedRateIds([]);
     setQuotation(null);
     setActiveStep("intake");
@@ -164,9 +191,10 @@ export default function Home() {
           <InquiryIntake request={request} setRequest={setRequest} />
           <SuppliersPanel
             request={request}
-            onAccepted={loadRates}
+            onAccepted={onRatesAccepted}
             onRefreshed={loadRates}
             onReplyReceived={addReceived}
+            onSourced={onLiveSourced}
           />
         </div>
 
@@ -176,13 +204,12 @@ export default function Home() {
             rates={rates}
             history={history}
             request={request}
-            sourcedHotels={sourcedHotels}
+            sourcedRateIds={sourcedRateIds}
             receivedRateIds={receivedRateIds}
             marginPct={marginPct}
             setMarginPct={setMarginPct}
             onGenerateQuote={onGenerateQuote}
             generatingRateId={generatingRateId}
-            onRechecked={loadRates}
           />
         </div>
 

@@ -24,7 +24,7 @@ function getStore(): Store {
   return global.__hotelStore;
 }
 
-/** Seeded + accepted rates, with any re-check overrides (refreshed cost/availability/capturedAt) applied. */
+/** Seeded + accepted rates, with any supplier-reply overrides (latest cost/availability) applied. */
 export function getWorkingRates(): Rate[] {
   const { acceptedRates, overrides } = getStore();
   return [...SEED_RATES, ...acceptedRates].map((r) =>
@@ -32,7 +32,7 @@ export function getWorkingRates(): Rate[] {
   );
 }
 
-/** Record a refreshed rate from a supplier re-check. */
+/** Record updated cost/availability from a supplier's reply for this request. */
 export function setRateOverride(id: string, patch: Partial<Rate>): void {
   const store = getStore();
   store.overrides[id] = { ...store.overrides[id], ...patch };

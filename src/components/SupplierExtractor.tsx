@@ -5,7 +5,7 @@ import { Loader2, PackageCheck, AlertTriangle } from "lucide-react";
 import { ROOM_TYPES, type Rate, type RoomType } from "@/lib/schemas";
 import { SAMPLE_SUPPLIER_MESSAGES } from "@/lib/seed/samples";
 
-export function SupplierExtractor({ onAccepted }: { onAccepted: () => void }) {
+export function SupplierExtractor({ onAccepted }: { onAccepted: (acceptedIds: string[]) => void }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +51,10 @@ export function SupplierExtractor({ onAccepted }: { onAccepted: () => void }) {
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error);
+      const acceptedIds = rates.map((r) => r.id);
       setAccepted((n) => n + rates.length);
       setRates([]);
-      onAccepted();
+      onAccepted(acceptedIds); // surface them in Compare (sourced + replied)
     } catch (e) {
       setError((e as Error).message);
     } finally {

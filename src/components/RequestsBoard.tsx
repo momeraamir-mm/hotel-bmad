@@ -19,7 +19,6 @@ import { LEAD_STATUSES, type Lead, type LeadFlag, type LeadStatus } from "@/lib/
 const FLAG_META: Record<NonNullable<LeadFlag>, { label: string; tone: "red" | "amber" }> = {
   "supplier-replied": { label: "Supplier replied", tone: "red" },
   approval: { label: "Needs approval", tone: "red" },
-  stale: { label: "Rate going stale", tone: "amber" },
   "client-waiting": { label: "Client waiting", tone: "amber" },
 };
 
@@ -279,7 +278,6 @@ export function RequestsBoard({
     { label: "Approve outreach", count: leads.filter((l) => l.needsOutreachApproval).length, tone: "red" as const },
     { label: "Supplier replies", count: leads.filter((l) => l.flag === "supplier-replied").length, tone: "red" as const },
     { label: "Awaiting approval", count: leads.filter((l) => l.flag === "approval").length, tone: "red" as const },
-    { label: "Rates going stale", count: leads.filter((l) => l.flag === "stale").length, tone: "amber" as const },
     { label: "Unassigned", count: leads.filter((l) => l.owner === null).length, tone: "amber" as const },
   ].filter((m) => m.count > 0);
 

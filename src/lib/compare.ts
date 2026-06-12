@@ -13,6 +13,7 @@ export type CompareCriteria = {
 export type ComparedRow = {
   rate: Rate;
   complete: boolean;
+  received: boolean; // has this supplier actually replied yet? (pending = still awaiting)
   clientPrice: number | null;
   isBestPick: boolean;
 };
@@ -32,12 +33,11 @@ export function compareRates(
   rates: Rate[],
   criteria: CompareCriteria,
   marginPct: number,
+  receivedIds?: string[], // ids that have replied; undefined = treat all as replied
 ): ComparisonResult {
-  // Match on room type primarily. (Dates/city are demo-soft: we keep all rates of the
-  // requested room type so the seeded scenario always has something to compare.)
-  const matched = rates.filter((r) => r.roomType === criteria.roomType);
-
-  let pool = matched.length > 0 ? matched : rates;
+  // Only the requested room type — suppliers quote the exact room the client needs,
+  // so the comparison is apples-to-apples and never mixes in other room types.
+  let pool = rates.filter((r) => r.roomType === criteria.roomType);
 
   // Scope to the hotels we actually sourced for this request — you only compare what
   // suppliers quoted for this requirement, not the whole inventory.
@@ -45,19 +45,24 @@ export function compareRates(
     pool = pool.filter((r) => criteria.hotels!.includes(r.hotel));
   }
 
+  const isReceived = (id: string) => (receivedIds ? receivedIds.includes(id) : true);
+
   const rows: ComparedRow[] = pool.map((rate) => {
+    const received = isReceived(rate.id);
     const complete = isRateComplete(rate);
     return {
       rate,
       complete,
-      clientPrice: rate.costPrice != null ? clientPrice(rate.costPrice, marginPct) : null,
+      received,
+      // Only price rows that have actually replied — pending rows show no figures.
+      clientPrice: received && rate.costPrice != null ? clientPrice(rate.costPrice, marginPct) : null,
       isBestPick: false,
     };
   });
 
-  // Rank complete rows by client price ascending.
+  // Rank only replied, complete rows — a still-pending supplier can't be the Best Pick.
   const ranked = rows
-    .filter((r) => r.complete && r.clientPrice != null)
+    .filter((r) => r.received && r.complete && r.clientPrice != null)
     .sort((a, b) => (a.clientPrice! - b.clientPrice!));
 
   let bestPickId: string | null = null;
@@ -75,10 +80,11 @@ export function compareRates(
     }
   }
 
-  // Sort display: best pick first, then complete by price, then incomplete last.
+  // Sort display: best pick first, then replied complete by price, then pending last.
   rows.sort((a, b) => {
     if (a.isBestPick) return -1;
     if (b.isBestPick) return 1;
+    if (a.received !== b.received) return a.received ? -1 : 1; // pending rows sink to the bottom
     if (a.complete !== b.complete) return a.complete ? -1 : 1;
     if (a.clientPrice == null) return 1;
     if (b.clientPrice == null) return -1;

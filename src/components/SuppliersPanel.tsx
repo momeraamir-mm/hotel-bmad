@@ -13,11 +13,13 @@ export function SuppliersPanel({
   onAccepted,
   onRefreshed,
   onReplyReceived,
+  onSourced,
 }: {
   request: StructuredRequest | null;
-  onAccepted: () => void;
+  onAccepted: (acceptedIds: string[]) => void;
   onRefreshed: () => void;
   onReplyReceived: (rateIds: string[]) => void;
+  onSourced: (rateIds: string[]) => void;
 }) {
   const [tab, setTab] = useState<Tab>("paste");
 
@@ -46,7 +48,7 @@ export function SuppliersPanel({
       {tab === "paste" ? (
         <SupplierExtractor onAccepted={onAccepted} />
       ) : (
-        <SupplierAutoRequests request={request} onRefreshed={onRefreshed} onReplyReceived={onReplyReceived} />
+        <SupplierAutoRequests request={request} onRefreshed={onRefreshed} onReplyReceived={onReplyReceived} onSourced={onSourced} />
       )}
     </section>
   );

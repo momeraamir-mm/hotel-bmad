@@ -18,7 +18,7 @@ export const LEAD_STATUSES = [
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
 /** The thing that makes a request need a human right now. */
-export type LeadFlag = "supplier-replied" | "approval" | "stale" | "client-waiting" | null;
+export type LeadFlag = "supplier-replied" | "approval" | "client-waiting" | null;
 
 export type Lead = {
   id: string;
@@ -186,7 +186,7 @@ export const SEED_LEADS: Lead[] = [
     status: "Awaiting approval",
     owner: "Riyas",
     ageHours: 8,
-    flag: "stale",
+    flag: "approval",
     sourcedHotels: ["Conrad Makkah", "Hilton Suites Makkah", "Hyatt Regency Makkah"],
   },
   {

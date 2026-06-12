@@ -2,10 +2,9 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { Loader2, Copy, Check, Printer, ShieldCheck, Send, FileText, AlertTriangle, Pencil, X } from "lucide-react";
+import { Loader2, Copy, Check, Printer, ShieldCheck, Send, FileText, Pencil, X } from "lucide-react";
 import type { Language, Quotation } from "@/lib/schemas";
 import { LANGUAGE_LABELS, dirFor, isRTL } from "@/lib/i18n";
-import { freshness } from "@/lib/pricing";
 
 const LANGS: Language[] = ["en", "ar", "ur"];
 
@@ -99,9 +98,6 @@ export function QuotationView({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
-
-  const rateFresh = freshness(quotation.rateCapturedAt, Date.now());
-  const rateStale = rateFresh.label === "stale" && quotation.status !== "Sent";
 
   const steps: { key: Quotation["status"]; label: string; done: boolean }[] = [
     { key: "Draft", label: "Draft", done: true },
@@ -199,14 +195,6 @@ export function QuotationView({
       </div>
 
       {error && <p className="px-5 pb-2 text-xs text-red-600 no-print">{error}</p>}
-
-      {rateStale && (
-        <div className="mx-5 mb-1 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 no-print">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          This rate was last confirmed {rateFresh.ageText} — hotel rates change fast. Re-check it with the supplier in the
-          comparison before sending.
-        </div>
-      )}
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2 border-t border-sand px-5 py-4 no-print">
